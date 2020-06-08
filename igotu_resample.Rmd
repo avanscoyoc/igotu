@@ -1,11 +1,11 @@
 ---
-title: "resample_igotu"
+title: "How buffer size and igotu fix length influence behavior analysis"
 author: "Amy Van Scoyoc"
 date: "5/20/2020"
 output: html_document
 ---
 
-
+#Load Packages
 ```{r}
 #load packages
 library(tidyverse)
@@ -15,10 +15,12 @@ library(amt)
 library(survival)
 ```
 
+#Import
 
+First, I import the raw igotu data for all animals, combine the .csvs, and add a column for the animal ID based on the file name. I then format the timestamps and nest the data by ID so that we can create a track for each animal using the `amt` package.  
 ```{r}
 #set working directory
-setwd("/Users/Amy/Desktop/igotu/raw_data_igotu")
+setwd("/Users/Amy/Berkeley Classes/Brashares Lab/projects/igotu/raw_data")
 #set options to prevent truncated lat/long
 options(digits=15)
 #get file names
@@ -32,7 +34,7 @@ data <- purrr::map_df(files, function(x) {
   nest(-ID) #nest the data by animal ID
 ```
 
-
+Next, we create a track for each individual animal using the `amt` package and transform the coordinates to UTMs so that it is easier to work with.
 ```{r}
 #make "track" for each ID using amt package
 igotu <- data %>% 
@@ -43,7 +45,11 @@ igotu <- data %>%
   }))
 ```
 
+#Resampling
 
+In order to measure the impact of fix rate on fence crossing analyses, we have to resample the animal tracks to various intervals. 
+
+First, I check the sampling rate of the raw data, just to see what we are working with. 
 ```{r}
 #check sampling rate
 igotu %>%
@@ -51,6 +57,7 @@ igotu %>%
   dplyr::select(ID, sr) %>% unnest
 ```
 
+Next, I write a function to classify animal tracks into bursts, eliminating bursts with fewer than 2 points. I run this function with various intervals to create data frames with bursts of different fix rates.  *Note that this function uses `seconds()` as the rate, so multiply by 60 to convert to minutes and again by 60 to convert to hours.  
 ```{r}
 #resample function for multiple intervals (in seconds)
 resample <- function(df, rate){
@@ -74,7 +81,8 @@ three_hr[[4]]
 frames <- list(ten_sec,five_min,thirty_min,one_hr,three_hr)
 ```
 
-
+#Fences
+Here, I load in fence shapefiles of HREC using the `sf` package. I specify fence buffer sizes I want to test and transform the crs into UTMs to match the animal data. 
 ```{r}
 library(sf)
 
@@ -91,7 +99,8 @@ fence_buff_1m <- st_buffer(fences, 1) %>% st_transform(crs = st_crs(crs))
 fence_buff_.5m <- st_buffer(fences, 0.5) %>% st_transform(crs = st_crs(crs))
 ```
 
-
+#Fence Encounters
+To measure whether an animal crosses a fence, I create a function that counts the number of bursts that intersect a fence buffer. 
 ```{r}
 #create encounter function
 encounters <- function(x, crs, layer){
@@ -113,7 +122,7 @@ encounters <- function(x, crs, layer){
 }
 ```
 
-
+I apply this function to all animals frames, with each combination of fix rate and buffer size. 
 ```{r}
 #set new inits
 #frames <- list(tensec_dat,fivemin_dat,thirtymin_dat,onehour_dat,threehour_dat)
@@ -147,6 +156,7 @@ cross <- list("500-m" = map_dfr(frames, encounters, crs, fence_buff_500m),
 #plot(st_geometry(is),col="red", add=T)
 ```
 
+To ensure that we compare the proportion of fence crossings at each fix rate (i.e. higher fix rates have higher numbers of bursts, so the numbers are somewhat misleading to compare), I create a function to total the number of bursts for each animal ID at each fix rate.  I bind this to our data frame and use it to calculate the proportion of crossings. 
 ```{r}
 #calculate total # of steps (i.e. bursts) per track
 totals <- function(x){
@@ -174,6 +184,8 @@ n_cross <- cross %>%
 
 ```
 
+#Plotting
+Here are the results: 
 
 ```{r}
 #plot effect of fence buffer and fix-length on # of steps encountering fence
@@ -257,8 +269,7 @@ ggplot(median_perc_bursts, aes(x=fence_buffer, y=median)) +
 ```
 
 
-```{r}
-#looks great, now I just need to filter the igotu data so that the fixes are only on the deer after release (some pre data from HREC and stuff is there which influences encounter rates in the bursts)
-```
+This looks great, now I just need to filter the igotu data so that the fixes are only on the deer after release (some pre-data from HREC and stuff is there which influences encounter rates in the bursts).  See igotu_exploratory.rmd
+
 
 
