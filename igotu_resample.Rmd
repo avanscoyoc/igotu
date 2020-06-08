@@ -2,7 +2,7 @@
 title: "How buffer size and igotu fix length influence behavior analysis"
 author: "Amy Van Scoyoc"
 date: "5/20/2020"
-output: html_document
+output: github_document
 ---
 
 #Load Packages
