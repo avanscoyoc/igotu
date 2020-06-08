@@ -20,7 +20,7 @@ library(survival)
 First, I import the raw igotu data for all animals, combine the .csvs, and add a column for the animal ID based on the file name. I then format the timestamps and nest the data by ID so that we can create a track for each animal using the `amt` package.  
 ```{r}
 #set working directory
-setwd("/Users/Amy/Berkeley Classes/Brashares Lab/projects/igotu/raw_data")
+setwd("raw_data")
 #set options to prevent truncated lat/long
 options(digits=15)
 #get file names
