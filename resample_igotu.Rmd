@@ -1,0 +1,264 @@
+---
+title: "resample_igotu"
+author: "Amy Van Scoyoc"
+date: "5/20/2020"
+output: html_document
+---
+
+
+```{r}
+#load packages
+library(tidyverse)
+library(plyr)
+library(readr)
+library(amt)
+library(survival)
+```
+
+
+```{r}
+#set working directory
+setwd("/Users/Amy/Desktop/igotu/raw_data_igotu")
+#set options to prevent truncated lat/long
+options(digits=15)
+#get file names
+files <- list.files()
+#read in files
+data <- purrr::map_df(files, function(x) {
+                      	data <- read_csv(x) %>% select(1:4)
+                      	cbind(ID = substr(x,1,2), data)
+}) %>% #create timestamp
+  mutate(timestamp = as.POSIXct(paste(Date, Time), format = "%Y-%m-%d %H:%M:%S", tz = "America/Los_Angeles")) %>% 
+  nest(-ID) #nest the data by animal ID
+```
+
+
+```{r}
+#make "track" for each ID using amt package
+igotu <- data %>% 
+  mutate(trk = map(data, function(d){
+    mk_track(d, Longitude, Latitude, timestamp, crs = CRS("+init=epsg:4326")) %>% 
+      # Transform latlongs into UTMs
+      transform_coords(CRS("+proj=utm +zone=10 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+  }))
+```
+
+
+```{r}
+#check sampling rate
+igotu %>%
+  mutate(sr = lapply(trk, summarize_sampling_rate)) %>% 
+  dplyr::select(ID, sr) %>% unnest
+```
+
+```{r}
+#resample function for multiple intervals (in seconds)
+resample <- function(df, rate){
+            steps <- df %>% 
+                mutate(step = map(df[[3]],function(x){
+                              x %>% 
+                              # Eliminate steps longer than 3 hours
+                              track_resample(rate = seconds(rate), tolerance = seconds(1)) %>%
+                              # Eliminate bursts with fewer than 2 points
+                              filter_min_n_burst(min_n = 2)}))
+            return(steps)
+}
+#apply resample function
+ten_sec <- resample(igotu,10)
+five_min <- resample(igotu,5*60)
+thirty_min <- resample(igotu,30*60)
+one_hr <- resample(igotu,1*60*60)
+three_hr <- resample(igotu,3*60*60)
+three_hr[[4]]
+#combine dfs into single list for interation later
+frames <- list(ten_sec,five_min,thirty_min,one_hr,three_hr)
+```
+
+
+```{r}
+library(sf)
+
+#read in fence shapefile
+fences <- st_read("/Users/Amy/Desktop/igotu/fences/Fences_103015.shp")
+#set crs 
+crs = "+proj=utm +zone=10 +datum=WGS84 +units=m +no_defs"
+#adjust buffer distances 
+fence_buff_500m <- st_buffer(fences, 500) %>% st_transform(crs = st_crs(crs))
+fence_buff_100m <- st_buffer(fences, 100) %>% st_transform(crs = st_crs(crs))
+fence_buff_50m <- st_buffer(fences, 50) %>% st_transform(crs = st_crs(crs))
+fence_buff_10m <- st_buffer(fences, 10) %>% st_transform(crs = st_crs(crs))
+fence_buff_1m <- st_buffer(fences, 1) %>% st_transform(crs = st_crs(crs))
+fence_buff_.5m <- st_buffer(fences, 0.5) %>% st_transform(crs = st_crs(crs))
+```
+
+
+```{r}
+#create encounter function
+encounters <- function(x, crs, layer){
+  temp <- map(x$step, function(y){
+                                y %>% 
+                                  st_as_sf(coords = c("x_", "y_")) %>% 
+                                  group_by(burst_) %>% 
+                                  summarize(do_union = FALSE) %>% 
+                                  st_cast("LINESTRING") %>% 
+                                  st_set_crs(crs) %>% 
+                                  st_intersects(layer) %>% 
+                                  map(length) %>% 
+                                  subset(. != 0) %>% 
+                                  length()}) %>% 
+          unlist() %>% 
+          `names<-`(as.character(quote(x))) %>% 
+          as_tibble()
+  return(temp)
+}
+```
+
+
+```{r}
+#set new inits
+#frames <- list(tensec_dat,fivemin_dat,thirtymin_dat,onehour_dat,threehour_dat)
+fixes <- c("10-sec","5-min", "30-min", "1-hr", "3-hr") %>% rep(each=4)
+animal_IDs <- igotu[[1]]
+#run encounter function
+n_crossings <- list("500-m" = map_dfc(frames, encounters, crs, fence_buff_500m),
+                    "100-m" = map_dfc(frames, encounters, crs, fence_buff_100m),
+                    "50-m" = map_dfc(frames, encounters, crs, fence_buff_50m), 
+                    "10-m" = map_dfc(frames, encounters, crs, fence_buff_10m), 
+                    "1-m" = map_dfc(frames, encounters, crs, fence_buff_1m),
+                    ".5-m" = map_dfc(frames, encounters, crs, fence_buff_.5m)) %>% 
+               bind_rows(.id="buffers") %>% 
+               cbind(ID = animal_IDs,.) %>% 
+               `names<-`(colnames)
+n_crossings
+
+
+cross <- list("500-m" = map_dfr(frames, encounters, crs, fence_buff_500m),
+              "100-m" = map_dfr(frames, encounters, crs, fence_buff_100m),
+              "50-m" = map_dfr(frames, encounters, crs, fence_buff_50m), 
+              "10-m" = map_dfr(frames, encounters, crs, fence_buff_10m), 
+              "1-m" = map_dfr(frames, encounters, crs, fence_buff_1m),
+              ".5-m" = map_dfr(frames, encounters, crs, fence_buff_.5m)) %>% 
+              bind_rows(.id="buffers") %>% 
+              cbind(ID = animal_IDs,fixes = fixes,.)
+
+#length(which(sapply(., length)!=0))
+#length(which(sapply(, length)!=0))/length(is)*100
+#plot(st_geometry(fence_buff_100m))
+#plot(st_geometry(is),col="red", add=T)
+```
+
+```{r}
+#calculate total # of steps (i.e. bursts) per track
+totals <- function(x){
+      t <- map(x$step, function(y){
+                  y %>% 
+                  group_by(burst_) %>% 
+                  tally() %>%
+                  nrow()}) %>% 
+      unlist() %>% 
+      `names<-`(as.character(quote(x))) %>% 
+      as_tibble()
+  return(t)
+}
+
+t <- list("totals" = map_dfr(frames, totals)) %>% 
+  bind_rows() %>%
+  cbind(id=paste0(animal_IDs,fixes),ID=animal_IDs, fixes=fixes,.) %>% 
+  select(id=id,total_bursts=4)
+     
+n_cross <- cross %>% 
+  mutate(id=paste0(ID,fixes)) %>% 
+  left_join(.,t,by="id") %>% 
+  mutate(percent_cross = value/total_bursts*100) %>% 
+  `names<-`(c("ID", "fix", "fence_buffer","cross_bursts","id","total_bursts","percent_cross"))
+
+```
+
+
+```{r}
+#plot effect of fence buffer and fix-length on # of steps encountering fence
+ggplot(n_cross, aes(x=fix, y=cross_bursts)) +
+  scale_x_discrete(limits = c("10-sec","5-min", "30-min", "1-hr", "3-hr")) + 
+  geom_line(aes(group=interaction(ID, fence_buffer), color=fence_buffer)) +
+  ggtitle("Effect of fix length and buffer size on fence encounter bursts") +
+  ylab("Fence encounters (bursts)") +
+  xlab("Fix length") +
+  theme_classic()
+```
+
+
+```{r}
+#plot median of fence buffer and fix-length on # of steps encountering fence
+median_n_bursts <- n_cross %>%
+                group_by(fence_buffer,fix) %>%
+                summarise(median = median(cross_bursts))
+
+ggplot(median_n_bursts, aes(x=fix, y=median)) +
+  scale_x_discrete(limits = c("10-sec","5-min", "30-min", "1-hr", "3-hr")) + 
+  geom_line(aes(group=fence_buffer,color=fence_buffer)) +
+  ggtitle("Median effect of fix length and buffer size on fence encounter bursts (N = 4 deer)") +
+  ylab("Fence encounters (bursts)") +
+  xlab("Fix length") +
+  theme_classic()
+```
+
+```{r}
+#this is misleading though because I used #of bursts
+#we need to look at the %encounters (since #bursts decreases with increasing fix rate)
+#to do this, I add a column to with the total #bursts, then I calculate %bursts
+ggplot(n_cross, aes(x=fix, y=percent_cross)) +
+  scale_x_discrete(limits = c("10-sec","5-min", "30-min", "1-hr", "3-hr")) + 
+  geom_line(aes(group=interaction(ID, fence_buffer), color=fence_buffer)) +
+  ggtitle("Effect of fix length on % fence encounters (bursts)") +
+  ylab("Fence encounters (bursts)") +
+  xlab("Fix length") +
+  theme_classic()
+```
+
+
+```{r}
+#plot median of fence buffer and fix-length on # of steps encountering fence
+median_perc_bursts <- n_cross %>%
+                group_by(fence_buffer,fix) %>%
+                summarise(median = median(percent_cross))
+
+ggplot(median_perc_bursts, aes(x=fix, y=median)) +
+  scale_x_discrete(limits = c("10-sec","5-min", "30-min", "1-hr", "3-hr")) + 
+  geom_line(aes(group=fence_buffer,color=fence_buffer)) +
+  ggtitle("Median effect of fence buffer size on percent fence encounters (N = 4 deer)") +
+  ylab("Fence encounters (bursts)") +
+  xlab("Fix length") +
+  theme_classic()
+```
+
+
+```{r}
+ggplot(n_cross, aes(x=fence_buffer, y=percent_cross)) +
+  scale_x_discrete(limits = c(".5-m","1-m", "10-m", "50-m", "100-m","500-m")) + 
+  geom_line(aes(group=interaction(ID, fix), color=fix)) +
+  #facet_grid(ID~.)+
+  ggtitle("Effect of fix rate on % fence encounters (bursts)") +
+  ylab("Fence encounters (bursts)") +
+  xlab("Fence buffer (meters)") +
+  theme_classic()
+```
+
+
+```{r}
+#plot median of fence buffer and fix-length on # of steps encountering fence
+ggplot(median_perc_bursts, aes(x=fence_buffer, y=median)) +
+  scale_x_discrete(limits = c(".5-m","1-m", "10-m", "50-m", "100-m","500-m")) + 
+  geom_line(aes(group=fix, color=fix)) +
+  #facet_grid(ID~.)+
+  ggtitle("Effect of fixe rate on % fence encounters (bursts)") +
+  ylab("Fence encounters (bursts)") +
+  xlab("Fence buffer (meters)") +
+  theme_classic()
+```
+
+
+```{r}
+#looks great, now I just need to filter the igotu data so that the fixes are only on the deer after release (some pre data from HREC and stuff is there which influences encounter rates in the bursts)
+```
+
+
