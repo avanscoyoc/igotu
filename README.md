@@ -8,7 +8,7 @@ Data was gathered by Dr. Alex McInturff & Dr. Kaitlyn Gaynor at Hopland Research
 1. Evaluate length and resolution of data (**igotu_exploratory.rmd**)
 
 2. Measure the effect of fence buffer size and fix length on (**igotu_resample.rmd**): 
-      * # of fence crossing events
+      * number of fence crossing events
       * behavior classification at fences using BaBA
       
 3. Compare fence crossing behavior among individuals (**igotu_demographics.rmd**)
