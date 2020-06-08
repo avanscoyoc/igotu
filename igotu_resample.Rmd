@@ -5,6 +5,10 @@ date: "5/20/2020"
 output: github_document
 ---
 
+```{r}
+knitr::opts_chunk$set(message = F, warning = F)
+```
+
 #Load Packages
 ```{r}
 #load packages
@@ -14,6 +18,7 @@ library(readr)
 library(amt)
 library(survival)
 ```
+
 
 #Import
 
@@ -44,6 +49,7 @@ igotu <- data %>%
       transform_coords(CRS("+proj=utm +zone=10 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0"))
   }))
 ```
+
 
 #Resampling
 
@@ -81,13 +87,15 @@ three_hr[[4]]
 frames <- list(ten_sec,five_min,thirty_min,one_hr,three_hr)
 ```
 
+
 #Fences
+
 Here, I load in fence shapefiles of HREC using the `sf` package. I specify fence buffer sizes I want to test and transform the crs into UTMs to match the animal data. 
 ```{r}
 library(sf)
 
 #read in fence shapefile
-fences <- st_read("/Users/Amy/Desktop/igotu/fences/Fences_103015.shp")
+fences <- st_read("fences/Fences_103015.shp")
 #set crs 
 crs = "+proj=utm +zone=10 +datum=WGS84 +units=m +no_defs"
 #adjust buffer distances 
@@ -99,7 +107,9 @@ fence_buff_1m <- st_buffer(fences, 1) %>% st_transform(crs = st_crs(crs))
 fence_buff_.5m <- st_buffer(fences, 0.5) %>% st_transform(crs = st_crs(crs))
 ```
 
+
 #Fence Encounters
+
 To measure whether an animal crosses a fence, I create a function that counts the number of bursts that intersect a fence buffer. 
 ```{r}
 #create encounter function
@@ -125,22 +135,10 @@ encounters <- function(x, crs, layer){
 I apply this function to all animals frames, with each combination of fix rate and buffer size. 
 ```{r}
 #set new inits
-#frames <- list(tensec_dat,fivemin_dat,thirtymin_dat,onehour_dat,threehour_dat)
 fixes <- c("10-sec","5-min", "30-min", "1-hr", "3-hr") %>% rep(each=4)
 animal_IDs <- igotu[[1]]
+
 #run encounter function
-n_crossings <- list("500-m" = map_dfc(frames, encounters, crs, fence_buff_500m),
-                    "100-m" = map_dfc(frames, encounters, crs, fence_buff_100m),
-                    "50-m" = map_dfc(frames, encounters, crs, fence_buff_50m), 
-                    "10-m" = map_dfc(frames, encounters, crs, fence_buff_10m), 
-                    "1-m" = map_dfc(frames, encounters, crs, fence_buff_1m),
-                    ".5-m" = map_dfc(frames, encounters, crs, fence_buff_.5m)) %>% 
-               bind_rows(.id="buffers") %>% 
-               cbind(ID = animal_IDs,.) %>% 
-               `names<-`(colnames)
-n_crossings
-
-
 cross <- list("500-m" = map_dfr(frames, encounters, crs, fence_buff_500m),
               "100-m" = map_dfr(frames, encounters, crs, fence_buff_100m),
               "50-m" = map_dfr(frames, encounters, crs, fence_buff_50m), 
@@ -149,11 +147,6 @@ cross <- list("500-m" = map_dfr(frames, encounters, crs, fence_buff_500m),
               ".5-m" = map_dfr(frames, encounters, crs, fence_buff_.5m)) %>% 
               bind_rows(.id="buffers") %>% 
               cbind(ID = animal_IDs,fixes = fixes,.)
-
-#length(which(sapply(., length)!=0))
-#length(which(sapply(, length)!=0))/length(is)*100
-#plot(st_geometry(fence_buff_100m))
-#plot(st_geometry(is),col="red", add=T)
 ```
 
 To ensure that we compare the proportion of fence crossings at each fix rate (i.e. higher fix rates have higher numbers of bursts, so the numbers are somewhat misleading to compare), I create a function to total the number of bursts for each animal ID at each fix rate.  I bind this to our data frame and use it to calculate the proportion of crossings. 
@@ -184,10 +177,11 @@ n_cross <- cross %>%
 
 ```
 
-#Plotting
-Here are the results: 
 
-```{r}
+#Plotting
+
+Here are the results! 
+```{r echo=F}
 #plot effect of fence buffer and fix-length on # of steps encountering fence
 ggplot(n_cross, aes(x=fix, y=cross_bursts)) +
   scale_x_discrete(limits = c("10-sec","5-min", "30-min", "1-hr", "3-hr")) + 
@@ -198,8 +192,7 @@ ggplot(n_cross, aes(x=fix, y=cross_bursts)) +
   theme_classic()
 ```
 
-
-```{r}
+```{r echo=F}
 #plot median of fence buffer and fix-length on # of steps encountering fence
 median_n_bursts <- n_cross %>%
                 group_by(fence_buffer,fix) %>%
@@ -214,7 +207,7 @@ ggplot(median_n_bursts, aes(x=fix, y=median)) +
   theme_classic()
 ```
 
-```{r}
+```{r echo=F}
 #this is misleading though because I used #of bursts
 #we need to look at the %encounters (since #bursts decreases with increasing fix rate)
 #to do this, I add a column to with the total #bursts, then I calculate %bursts
@@ -228,7 +221,7 @@ ggplot(n_cross, aes(x=fix, y=percent_cross)) +
 ```
 
 
-```{r}
+```{r echo=F}
 #plot median of fence buffer and fix-length on # of steps encountering fence
 median_perc_bursts <- n_cross %>%
                 group_by(fence_buffer,fix) %>%
@@ -244,7 +237,7 @@ ggplot(median_perc_bursts, aes(x=fix, y=median)) +
 ```
 
 
-```{r}
+```{r echo=F}
 ggplot(n_cross, aes(x=fence_buffer, y=percent_cross)) +
   scale_x_discrete(limits = c(".5-m","1-m", "10-m", "50-m", "100-m","500-m")) + 
   geom_line(aes(group=interaction(ID, fix), color=fix)) +
@@ -256,7 +249,7 @@ ggplot(n_cross, aes(x=fence_buffer, y=percent_cross)) +
 ```
 
 
-```{r}
+```{r echo=F}
 #plot median of fence buffer and fix-length on # of steps encountering fence
 ggplot(median_perc_bursts, aes(x=fence_buffer, y=median)) +
   scale_x_discrete(limits = c(".5-m","1-m", "10-m", "50-m", "100-m","500-m")) + 
