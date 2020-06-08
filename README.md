@@ -1,7 +1,7 @@
 # igotu
 A repository on importing, cleaning, and analyzing high resolution igotu data. 
 
-# data
+## data
 Data was gathered by Dr. Alex McInturff & Dr. Kaitlyn Gaynor at Hopland Research and Extension Center (HREC) in 2017. 
 
 ## project aims
